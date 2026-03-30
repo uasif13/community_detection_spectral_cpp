@@ -1,0 +1,50 @@
+[experiment]
+n_trials    = 10
+base_seed   = 42
+alphas      = [0.5, 0.6, 0.7, 0.8, 0.9]
+output_dir  = "results/exp1"
+run_leiden_resample = true
+
+[[datasets]]
+name = "ca-GrQc"
+url  = "https://snap.stanford.edu/data/ca-GrQc.txt.gz"
+
+[[datasets]]
+name = "ca-HepTh"
+url  = "https://snap.stanford.edu/data/ca-HepTh.txt.gz"
+
+[[datasets]]
+name = "ca-HepPh"
+url  = "https://snap.stanford.edu/data/ca-HepPh.txt.gz"
+
+[[datasets]]
+name = "ca-AstroPh"
+url  = "https://snap.stanford.edu/data/ca-AstroPh.txt.gz"
+
+[[datasets]]
+name = "ca-CondMat"
+url  = "https://snap.stanford.edu/data/ca-CondMat.txt.gz"
+
+[[datasets]]
+name = "cit-HepTh"
+url  = "https://snap.stanford.edu/data/cit-HepTh.txt.gz"
+
+[[datasets]]
+name = "cit-HepPh"
+url  = "https://snap.stanford.edu/data/cit-HepPh.txt.gz"
+
+[[datasets]]
+name = "email-Enron"
+url  = "https://snap.stanford.edu/data/email-Enron.txt.gz"
+
+[[datasets]]
+name = "facebook-combined"
+url  = "https://snap.stanford.edu/data/facebook_combined.txt.gz"
+
+[[datasets]]
+name = "wiki-Vote"
+url  = "https://snap.stanford.edu/data/wiki-Vote.txt.gz"
+
+[[datasets]]
+name = "email-Eu-core"
+url  = "https://snap.stanford.edu/data/email-Eu-core.txt.gz"

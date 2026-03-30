@@ -18,10 +18,10 @@ find_package(OpenMP REQUIRED)   # sudo apt install libomp-dev
 find_package(CURL REQUIRED)     # sudo apt install libcurl4-openssl-dev
 find_package(ZLIB REQUIRED)     # for .gz decompression
 
-# toml11: header-only, must be in extern/toml11
-include_directories(extern/toml11)
+# toml11: header-only single-include at extern/toml11/single_include
+include_directories(extern/toml11/single_include)
 
-# Stub sources for parts not yet implemented — will be replaced as parts are added
+# Sources shared between exp1 and tests
 set(CORE_SOURCES
     src/graph.cpp
     src/dspar.cpp
@@ -30,6 +30,27 @@ set(CORE_SOURCES
     src/leiden.cpp
     src/experiment.cpp
 )
+
+# Sources only needed by the main binary (require CURL/ZLIB)
+set(MAIN_ONLY_SOURCES
+    src/config.cpp
+    src/downloader.cpp
+)
+
+# Main binary
+add_executable(exp1
+    src/main.cpp
+    ${CORE_SOURCES}
+    ${MAIN_ONLY_SOURCES})
+
+target_link_libraries(exp1
+    PRIVATE
+    igraph::igraph
+    OpenMP::OpenMP_CXX
+    CURL::libcurl
+    ZLIB::ZLIB)
+
+target_include_directories(exp1 PRIVATE src)
 
 # Tests (Catch2)
 include(FetchContent)
