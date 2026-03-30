@@ -8,6 +8,10 @@
 #include <algorithm>
 #include <cmath>
 
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
 using Catch::Matchers::WithinAbs;
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -192,4 +196,45 @@ TEST_CASE("preserved_intra + preserved_inter == m_sparse", "[experiment]") {
     auto results = run_experiment(g, "karate", cfg);
     for (auto& r : results)
         CHECK(r.preserved_intra + r.preserved_inter == r.m_sparse);
+}
+
+TEST_CASE("parallel matches serial (OpenMP)", "[experiment][parallel]") {
+    // Run with 1 thread then with multiple threads — results must be bit-identical
+    // because the seed scheme is deterministic per (ai, t).
+    Graph g = make_karate();
+    ExperimentConfig cfg;
+    cfg.alphas            = {0.5, 0.6, 0.7, 0.8, 0.9};
+    cfg.n_trials          = 6;
+    cfg.base_seed         = 123;
+    cfg.run_leiden_resample = false;  // deterministic; Leiden is randomised
+
+#ifdef _OPENMP
+    omp_set_num_threads(1);
+    auto serial = run_experiment(g, "karate", cfg);
+
+    omp_set_num_threads(4);
+    auto parallel = run_experiment(g, "karate", cfg);
+
+    REQUIRE(serial.size() == parallel.size());
+    for (int i = 0; i < (int)serial.size(); i++) {
+        CHECK(serial[i].seed     == parallel[i].seed);
+        CHECK(serial[i].m_sparse == parallel[i].m_sparse);
+        CHECK_THAT(serial[i].F_observed,
+                   WithinAbs(parallel[i].F_observed, 1e-15));
+        CHECK_THAT(serial[i].modularity_fixed_change,
+                   WithinAbs(parallel[i].modularity_fixed_change, 1e-15));
+        CHECK_THAT(serial[i].dQ_reconstructed,
+                   WithinAbs(parallel[i].dQ_reconstructed, 1e-15));
+    }
+    // restore default
+    omp_set_num_threads(omp_get_max_threads());
+#else
+    // Without OpenMP the loop is single-threaded; test still validates seed scheme
+    auto r1 = run_experiment(g, "karate", cfg);
+    auto r2 = run_experiment(g, "karate", cfg);
+    REQUIRE(r1.size() == r2.size());
+    for (int i = 0; i < (int)r1.size(); i++)
+        CHECK_THAT(r1[i].modularity_fixed_change,
+                   WithinAbs(r2[i].modularity_fixed_change, 1e-15));
+#endif
 }

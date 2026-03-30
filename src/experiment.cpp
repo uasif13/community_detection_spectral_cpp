@@ -8,8 +8,13 @@
 
 #include <algorithm>
 #include <cmath>
+#include <mutex>
 #include <numeric>
 #include <stdexcept>
+
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 // ── internal helpers ──────────────────────────────────────────────────────────
 
@@ -87,35 +92,43 @@ std::vector<TrialResult> run_experiment(
 
     const double Q_fixed_original = orig.Q;
 
-    // ── 2. Per-alpha, per-trial loop ─────────────────────────────────────────
+    // ── 2. Per-alpha, per-trial loop (OpenMP parallelised) ───────────────────
     const int n_alphas = static_cast<int>(cfg.alphas.size());
-    std::vector<TrialResult> results;
-    results.reserve(n_alphas * cfg.n_trials);
+    const int total    = n_alphas * cfg.n_trials;
+    std::vector<TrialResult> results(total);
 
-    std::vector<bool> keep_buf;
-    keep_buf.reserve(g.m);
+    // igraph is not thread-safe for graph construction/algorithm calls.
+    std::mutex leiden_mtx;
 
+#pragma omp parallel for schedule(dynamic) collapse(2)
     for (int ai = 0; ai < n_alphas; ai++) {
-        double alpha = cfg.alphas[ai];
         for (int t = 0; t < cfg.n_trials; t++) {
-            uint64_t seed = cfg.base_seed
+            double   alpha = cfg.alphas[ai];
+            uint64_t seed  = cfg.base_seed
                 + static_cast<uint64_t>(t)  * 1000003ULL
                 + static_cast<uint64_t>(ai) * 7919ULL;
+
+            // Per-thread keep buffer (thread_local avoids repeated allocation)
+            thread_local std::vector<bool> keep_buf;
 
             Xoshiro256pp rng(seed);
             sample_edges_inplace(scores, alpha, rng, keep_buf);
 
+            // compute_modularity reads g/scores/membership_fixed (read-only) —
+            // safe to call concurrently.
             ModResult sp = compute_modularity(
                 g, &keep_buf, membership_fixed, scores.n1, scores.n2);
 
             double leiden_q = 0.0;
             if (cfg.run_leiden_resample) {
-                LeidenResult lr = run_leiden(g, &keep_buf);
-                leiden_q = lr.modularity;
+                // igraph global state is not thread-safe: serialise all calls.
+                std::lock_guard<std::mutex> lk(leiden_mtx);
+                leiden_q = run_leiden(g, &keep_buf).modularity;
             }
 
-            results.push_back(build_trial_result(
-                alpha, t, seed, scores, g, orig, sp, leiden_q, Q_fixed_original));
+            int idx = ai * cfg.n_trials + t;
+            results[idx] = build_trial_result(
+                alpha, t, seed, scores, g, orig, sp, leiden_q, Q_fixed_original);
         }
     }
 

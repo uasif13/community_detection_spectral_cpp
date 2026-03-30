@@ -72,7 +72,8 @@ add_executable(tests
 target_link_libraries(tests
     PRIVATE
     Catch2::Catch2WithMain
-    igraph::igraph)
+    igraph::igraph
+    OpenMP::OpenMP_CXX)
 
 target_include_directories(tests PRIVATE src)
 
