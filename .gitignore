@@ -1,0 +1,5 @@
+build/
+build_debug/
+data/
+results/
+extern/toml11/
