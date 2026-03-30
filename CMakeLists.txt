@@ -24,6 +24,7 @@ include_directories(extern/toml11)
 # Stub sources for parts not yet implemented — will be replaced as parts are added
 set(CORE_SOURCES
     src/graph.cpp
+    src/dspar.cpp
 )
 
 # Tests (Catch2)
@@ -36,6 +37,7 @@ FetchContent_MakeAvailable(Catch2)
 
 add_executable(tests
     tests/test_graph.cpp
+    tests/test_dspar.cpp
     ${CORE_SOURCES})
 
 target_link_libraries(tests
