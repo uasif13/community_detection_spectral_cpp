@@ -27,6 +27,7 @@ set(CORE_SOURCES
     src/dspar.cpp
     src/sampler.cpp
     src/modularity.cpp
+    src/leiden.cpp
 )
 
 # Tests (Catch2)
@@ -42,6 +43,7 @@ add_executable(tests
     tests/test_dspar.cpp
     tests/test_sampler.cpp
     tests/test_modularity.cpp
+    tests/test_leiden.cpp
     ${CORE_SOURCES})
 
 target_link_libraries(tests
