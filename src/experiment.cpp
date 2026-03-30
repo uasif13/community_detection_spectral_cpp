@@ -10,7 +10,6 @@
 #include <cmath>
 #include <mutex>
 #include <numeric>
-#include <stdexcept>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -92,9 +91,27 @@ std::vector<TrialResult> run_experiment(
 
     const double Q_fixed_original = orig.Q;
 
-    // ── 2. Per-alpha, per-trial loop (OpenMP parallelised) ───────────────────
+    // ── 2. One-time precomputation for performance optimisations ────────────
     const int n_alphas = static_cast<int>(cfg.alphas.size());
-    const int total    = n_alphas * cfg.n_trials;
+
+    // Opt B: precompute threshold[ai][i] = min(1.0, alpha*score[i]/mean) once per alpha.
+    // Eliminates per-edge division inside the per-trial hot loop.
+    std::vector<std::vector<double>> thresholds(n_alphas);
+    for (int ai = 0; ai < n_alphas; ai++) {
+        double alpha = cfg.alphas[ai];
+        thresholds[ai].resize(g.m);
+        for (int i = 0; i < g.m; i++)
+            thresholds[ai][i] = std::min(1.0, alpha * scores.score[i] / scores.mean);
+    }
+
+    // Opt D: precompute score CDF for the prefix-sum sampler (used when alpha < 0.3).
+    std::vector<double> score_cdf(g.m + 1, 0.0);
+    for (int i = 0; i < g.m; i++)
+        score_cdf[i + 1] = score_cdf[i] + scores.score[i];
+    const double total_score = score_cdf[g.m];
+
+    // ── 3. Per-alpha, per-trial loop (OpenMP parallelised) ───────────────────
+    const int total = n_alphas * cfg.n_trials;
     std::vector<TrialResult> results(total);
 
     // igraph is not thread-safe for graph construction/algorithm calls.
@@ -108,11 +125,19 @@ std::vector<TrialResult> run_experiment(
                 + static_cast<uint64_t>(t)  * 1000003ULL
                 + static_cast<uint64_t>(ai) * 7919ULL;
 
-            // Per-thread keep buffer (thread_local avoids repeated allocation)
+            // Opt A: per-thread keep buffer avoids per-trial allocation.
             thread_local std::vector<bool> keep_buf;
 
             Xoshiro256pp rng(seed);
-            sample_edges_inplace(scores, alpha, rng, keep_buf);
+
+            // Opt D / Opt B: choose sampler based on alpha and graph size.
+            if (alpha < 0.3 && g.m > 100000) {
+                int k = static_cast<int>(std::round(alpha * g.m));
+                sample_edges_prefix_sum(score_cdf, total_score, k, rng, keep_buf);
+            } else {
+                // Opt B: use pre-computed thresholds, no per-edge division.
+                sample_edges_bernoulli(thresholds[ai], rng, keep_buf);
+            }
 
             // compute_modularity reads g/scores/membership_fixed (read-only) —
             // safe to call concurrently.

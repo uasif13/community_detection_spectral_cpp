@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <numeric>
 #include <cmath>
+#include <algorithm>
 
 using Catch::Matchers::WithinAbs;
 
@@ -188,4 +189,116 @@ TEST_CASE("p(e) <= 1 clamping — edge with score >> mean", "[sampler]") {
         if (k[pendant_idx]) always_kept++;
     }
     CHECK(always_kept == 200);  // always kept because p was clamped to 1.0
+}
+
+// ── Opt B: pre-computed thresholds ───────────────────────────────────────────
+
+TEST_CASE("bernoulli threshold matches inplace for same RNG state", "[sampler][optB]") {
+    // sample_edges_bernoulli with pre-computed thresholds must produce
+    // the same result as sample_edges_inplace for the same RNG seed.
+    Graph g = make_complete(10);
+    DsparScores s = compute_scores(g);
+    const double alpha = 0.6;
+
+    // Build thresholds the same way run_experiment does
+    std::vector<double> threshold(g.m);
+    for (int i = 0; i < g.m; i++)
+        threshold[i] = std::min(1.0, alpha * s.score[i] / s.mean);
+
+    Xoshiro256pp rng1(42), rng2(42);
+    std::vector<bool> keep1, keep2;
+    sample_edges_inplace(s, alpha, rng1, keep1);
+    sample_edges_bernoulli(threshold, rng2, keep2);
+
+    REQUIRE(keep1.size() == keep2.size());
+    for (int i = 0; i < (int)keep1.size(); i++)
+        CHECK(keep1[i] == keep2[i]);
+}
+
+TEST_CASE("bernoulli threshold mean retention matches alpha", "[sampler][optB]") {
+    Graph g = make_complete(15);  // uniform scores → p(e) = alpha for all e
+    DsparScores s = compute_scores(g);
+    const double alpha = 0.7;
+
+    std::vector<double> threshold(g.m);
+    for (int i = 0; i < g.m; i++)
+        threshold[i] = std::min(1.0, alpha * s.score[i] / s.mean);
+
+    const int trials = 3000;
+    double total = 0.0;
+    Xoshiro256pp rng(99);
+    std::vector<bool> keep;
+    for (int t = 0; t < trials; t++) {
+        sample_edges_bernoulli(threshold, rng, keep);
+        for (bool k : keep) if (k) total++;
+    }
+    double mean_rate = total / (trials * g.m);
+    CHECK_THAT(mean_rate, WithinAbs(alpha, 0.02));
+}
+
+// ── Opt D: prefix-sum sampler ─────────────────────────────────────────────────
+
+TEST_CASE("prefix-sum never exceeds k unique edges", "[sampler][optD]") {
+    // Duplicate draws are collapsed into a single keep; result is always <= k.
+    Graph g = make_complete(20);  // 190 edges
+    DsparScores s = compute_scores(g);
+
+    std::vector<double> cdf(g.m + 1, 0.0);
+    for (int i = 0; i < g.m; i++)
+        cdf[i + 1] = cdf[i] + s.score[i];
+    double total = cdf[g.m];
+
+    const int k = 50;
+    Xoshiro256pp rng(7);
+    std::vector<bool> keep;
+    for (int t = 0; t < 20; t++) {
+        sample_edges_prefix_sum(cdf, total, k, rng, keep);
+        int kept = std::count(keep.begin(), keep.end(), true);
+        CHECK(kept <= k);
+        CHECK(kept > 0);
+    }
+}
+
+TEST_CASE("prefix-sum k=0 keeps nothing", "[sampler][optD]") {
+    Graph g = make_complete(10);
+    DsparScores s = compute_scores(g);
+    std::vector<double> cdf(g.m + 1, 0.0);
+    for (int i = 0; i < g.m; i++) cdf[i+1] = cdf[i] + s.score[i];
+    Xoshiro256pp rng(1);
+    std::vector<bool> keep;
+    sample_edges_prefix_sum(cdf, cdf[g.m], 0, rng, keep);
+    int kept = std::count(keep.begin(), keep.end(), true);
+    CHECK(kept == 0);
+}
+
+TEST_CASE("prefix-sum mean unique edges matches birthday formula", "[sampler][optD]") {
+    // When scores are uniform the expected number of unique edges retained is
+    //   E[U] = m * (1 - (1 - 1/m)^k)  ≈  m * (1 - exp(-k/m))
+    // Build a path of 200 nodes (199 edges) — non-uniform scores exercise CDF code.
+    std::string content;
+    for (int i = 0; i < 199; i++)
+        content += std::to_string(i) + " " + std::to_string(i+1) + "\n";
+    Graph g = load_snap(write_tmp("path200.txt", content));
+    DsparScores s = compute_scores(g);
+
+    std::vector<double> cdf(g.m + 1, 0.0);
+    for (int i = 0; i < g.m; i++) cdf[i+1] = cdf[i] + s.score[i];
+    double total = cdf[g.m];
+
+    const double alpha = 0.15;
+    const int k = static_cast<int>(std::round(alpha * g.m));
+    // Expected unique = m * (1 - exp(-k/m))
+    double expected_unique = g.m * (1.0 - std::exp(-static_cast<double>(k) / g.m));
+
+    const int trials = 2000;
+    double total_kept = 0.0;
+    Xoshiro256pp rng(42);
+    std::vector<bool> keep;
+    for (int t = 0; t < trials; t++) {
+        sample_edges_prefix_sum(cdf, total, k, rng, keep);
+        total_kept += std::count(keep.begin(), keep.end(), true);
+    }
+    double mean_kept = total_kept / trials;
+    // Tolerate ±10% of expected_unique (sampling variance + non-uniform scores)
+    CHECK_THAT(mean_kept, WithinAbs(expected_unique, expected_unique * 0.10 + 2.0));
 }
