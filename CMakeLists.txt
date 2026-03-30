@@ -25,6 +25,7 @@ include_directories(extern/toml11)
 set(CORE_SOURCES
     src/graph.cpp
     src/dspar.cpp
+    src/sampler.cpp
 )
 
 # Tests (Catch2)
@@ -38,6 +39,7 @@ FetchContent_MakeAvailable(Catch2)
 add_executable(tests
     tests/test_graph.cpp
     tests/test_dspar.cpp
+    tests/test_sampler.cpp
     ${CORE_SOURCES})
 
 target_link_libraries(tests
